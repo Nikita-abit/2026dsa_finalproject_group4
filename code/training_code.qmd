@@ -1,0 +1,136 @@
+---
+title: "open_source"
+format: html
+editor: visual
+---
+
+# Setup
+
+```{r}
+library(janitor)
+library(lubridate)
+library(readr)
+library(dplyr)
+library(purrr)
+library(tidyverse)
+library(USAboundaries) # for US state boundaries
+library(sf) # for US map
+library(ncdf4)
+library(daymetr)
+```
+
+```{r}
+# Import all CSV files
+
+meta <- read_csv("../2026dsa_finalproject_group4/data/training_meta.csv")
+soil <- read_csv("../2026dsa_finalproject_group4/data/training_soil.csv")
+trait <- read_csv("../2026dsa_finalproject_group4/data/training_trait.csv")
+
+# Merge all csv files in 1 file
+
+soil2 <- soil %>%
+  separate(site, into = c("site", "year2"), sep = "_", remove = F) %>%
+  select(-year2)
+
+# Create final csv file with all combine data
+
+final_data <- trait %>%
+  full_join(soil2, by = c("site","year")) %>%
+  full_join(meta, by = c("site", "year"))
+
+# Eliminating site outside the USA borders
+
+final_data <- final_data %>%
+  filter(longitude < 0)
+
+# Change date_planted and date_harvested from "month/day/year" to "DOY"
+
+final_data <- final_data %>%
+  mutate(
+    date_planted = mdy(date_planted),
+    date_harvested = mdy(date_harvested),
+    planted_doy = yday(date_planted),
+    harvested_doy = yday(date_harvested)
+  )
+
+final_data <- final_data %>%
+  select(-date_planted, -date_harvested)
+
+# Save the final csv file
+
+final_data <- final_data %>%
+  clean_names()
+
+
+
+write_csv(final_data, "data/final_data_training.csv")
+
+summary(final_data)
+```
+
+
+```{r}
+# Creating a map to see where are the sites
+
+states <- us_states() %>%
+  filter(!(state_abbr %in% c("PR", "AK", "HI")))
+
+ggplot() +
+  geom_sf(data = states) +
+  geom_point(data = final_data,
+             aes(x = longitude,
+                 y = latitude)
+             )
+```
+
+
+```{r}
+# Using Daymet to merge togheter sites and weather variables
+
+daymet_one <- download_daymet(site = final_data$site[1],
+                              lat = final_data$latitude[1],
+                              lon = final_data$longitude[1],
+                              start = final_data$year[1],
+                              end = final_data$year[1],
+                              simplify = T
+                              )
+
+daymet_one
+```
+
+
+```{r}
+#
+
+daymet_all <- final_data %>%
+  distinct(site, year, latitude, longitude) %>%
+  mutate(
+    weather = pmap(
+      list(.y = year,
+           .site = site,
+           .lat = latitude,
+           .lon = longitude),
+      function(.y, .site, .lat, .lon) {
+        download_daymet(
+          site = .site,
+          lat = .lat,
+          lon = .lon,
+          start = .y,
+          end = .y,
+          internal = TRUE,
+          simplify = TRUE,
+          silent = TRUE
+        )
+      }
+    )
+  )
+
+daymet_all$weather[[1]]
+```
+
+
+```{r}
+
+
+```
+
