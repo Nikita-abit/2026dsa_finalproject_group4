@@ -155,23 +155,9 @@ daymet_all_unnest
 
 ```{r}
 
-# Inserting planting and harvesting DOY inside daymet_all_unnest
-
-weather_with_dates <- daymet_all_unnest %>%
-  left_join(
-    final_data %>%
-      distinct(site, year, planted_doy, harvested_doy),
-    by = c("site", "year")
-  )
-
-# Having only the days from planted day and harvest day
-
-weather_season <- weather_with_dates %>%
-  filter(yday >= planted_doy & yday <= harvested_doy)
-
 # Summarise for the weather columns I want to use
 
-weather_summary <- weather_season %>%
+weather_summary <- daymet_all_unnest %>%
   group_by(site, year) %>%
   summarise(
     season_prcp = sum(prcp_mm_day, na.rm = TRUE),
