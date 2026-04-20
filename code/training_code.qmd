@@ -22,9 +22,9 @@ library(daymetr)
 ```{r}
 # Import all CSV files
 
-meta <- read_csv("../2026dsa_finalproject_group4/data/training_meta.csv")
-soil <- read_csv("../2026dsa_finalproject_group4/data/training_soil.csv")
-trait <- read_csv("../2026dsa_finalproject_group4/data/training_trait.csv")
+meta <- read_csv("../data/training_meta.csv")
+soil <- read_csv("../data/training_soil.csv")
+trait <- read_csv("../data/training_trait.csv")
 
 # Merge all csv files in 1 file
 
@@ -63,7 +63,7 @@ final_data <- final_data %>%
 
 
 
-write_csv(final_data, "data/final_data_training.csv")
+# write_csv(final_data, "final_data_training.csv")
 
 summary(final_data)
 ```
@@ -125,12 +125,69 @@ daymet_all <- final_data %>%
     )
   )
 
-daymet_all$weather[[1]]
+daymet_all$weather[[2]]
+names(daymet_all$weather[[1]])
+```
+
+
+```{r}
+# Unnest
+
+daymet_all_unnest <- daymet_all %>%
+  mutate(
+    weather = map(
+      weather,
+      ~ .x %>%
+        select(-site, -year, -latitude, -longitude)
+    )
+  ) %>%
+  unnest(weather) %>%
+  select(-tile) %>%
+  pivot_wider(
+    names_from = measurement,
+    values_from = value
+  ) %>%
+  clean_names()
+
+daymet_all_unnest
 ```
 
 
 ```{r}
 
+# Inserting planting and harvesting DOY inside daymet_all_unnest
+
+weather_with_dates <- daymet_all_unnest %>%
+  left_join(
+    final_data %>%
+      distinct(site, year, planted_doy, harvested_doy),
+    by = c("site", "year")
+  )
+
+# Having only the days from planted day and harvest day
+
+weather_season <- weather_with_dates %>%
+  filter(yday >= planted_doy & yday <= harvested_doy)
+
+# Summarise for the weather columns I want to use
+
+weather_summary <- weather_season %>%
+  group_by(site, year) %>%
+  summarise(
+    season_prcp = sum(prcp_mm_day, na.rm = TRUE),
+    season_tmax = mean(tmax_deg_c, na.rm = TRUE),
+    season_tmin = mean(tmin_deg_c, na.rm = TRUE),
+    season_srad = mean(srad_w_m_2, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Combine final_data with weather_summary
+
+final_data_weather <- final_data %>%
+  left_join(weather_summary, by = c("site", "year"))
+
+# write_csv(final_data, "final_data_weather_training.csv")
 
 ```
+
 
