@@ -22,9 +22,9 @@ library(daymetr)
 ```{r}
 # Import all CSV files
 
-meta <- read_csv("../data/training_meta.csv")
-soil <- read_csv("../data/training_soil.csv")
-trait <- read_csv("../data/training_trait.csv")
+meta <- read_csv("../data/testing_meta.csv")
+soil <- read_csv("../data/testing_soil.csv")
+trait <- read_csv("../data/testing_submission.csv")
 
 # Merge all csv files in 1 file
 
@@ -43,19 +43,6 @@ final_data <- trait %>%
 final_data <- final_data %>%
   filter(longitude < 0)
 
-# Change date_planted and date_harvested from "month/day/year" to "DOY"
-
-final_data <- final_data %>%
-  mutate(
-    date_planted = mdy(date_planted),
-    date_harvested = mdy(date_harvested),
-    planted_doy = yday(date_planted),
-    harvested_doy = yday(date_harvested)
-  )
-
-final_data <- final_data %>%
-  select(-date_planted, -date_harvested)
-
 # Save the final csv file
 
 final_data <- final_data %>%
@@ -63,11 +50,10 @@ final_data <- final_data %>%
 
 
 
-# write_csv(final_data, "final_data_training.csv")
+ write_csv(final_data, "../data/final_data_testing.csv")
 
 summary(final_data)
 ```
-
 
 ```{r}
 # Creating a map to see where are the sites
@@ -83,7 +69,6 @@ ggplot() +
              )
 ```
 
-
 ```{r}
 # Using Daymet to merge togheter sites and weather variables
 
@@ -97,7 +82,6 @@ daymet_one <- download_daymet(site = final_data$site[1],
 
 daymet_one
 ```
-
 
 ```{r}
 #
@@ -129,7 +113,6 @@ daymet_all$weather[[2]]
 names(daymet_all$weather[[1]])
 ```
 
-
 ```{r}
 # Unnest
 
@@ -152,32 +135,17 @@ daymet_all_unnest <- daymet_all %>%
 daymet_all_unnest
 ```
 
-
 ```{r}
-
-# Inserting planting and harvesting DOY inside daymet_all_unnest
-
-weather_with_dates <- daymet_all_unnest %>%
-  left_join(
-    final_data %>%
-      distinct(site, year, planted_doy, harvested_doy),
-    by = c("site", "year")
-  )
-
-# Having only the days from planted day and harvest day
-
-weather_season <- weather_with_dates %>%
-  filter(yday >= planted_doy & yday <= harvested_doy)
 
 # Summarise for the weather columns I want to use
 
-weather_summary <- weather_season %>%
+weather_summary <- daymet_all_unnest %>%
   group_by(site, year) %>%
   summarise(
-    season_prcp = sum(prcp_mm_day, na.rm = TRUE),
-    season_tmax = mean(tmax_deg_c, na.rm = TRUE),
-    season_tmin = mean(tmin_deg_c, na.rm = TRUE),
-    season_srad = mean(srad_w_m_2, na.rm = TRUE),
+    annual_prcp = sum(prcp_mm_day, na.rm = TRUE),
+    annual_tmax = mean(tmax_deg_c, na.rm = TRUE),
+    annual_tmin = mean(tmin_deg_c, na.rm = TRUE),
+    annual_srad = mean(srad_w_m_2, na.rm = TRUE),
     .groups = "drop"
   )
 
@@ -186,8 +154,6 @@ weather_summary <- weather_season %>%
 final_data_weather <- final_data %>%
   left_join(weather_summary, by = c("site", "year"))
 
-# write_csv(final_data, "final_data_weather_training.csv")
+ write_csv(final_data, "../data/final_data_weather_testing.csv")
 
 ```
-
-
