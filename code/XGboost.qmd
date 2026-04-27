@@ -1,0 +1,402 @@
+---
+title: "XGboost"
+format: html
+editor: visual
+editor_options: 
+  chunk_output_type: inline
+---
+
+## Quarto
+
+Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+
+## Running Code
+
+When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
+
+```{r}
+1 + 1
+```
+
+You can add options to executable code like this
+
+```{r}
+#| echo: false
+2 * 2
+```
+
+The `echo: false` option disables the printing of code (only output is displayed).
+
+```{r}
+# loadig packages
+#install.packages("doParallel")
+library(tidymodels)   
+library(finetune)     
+library(vip)          
+library(xgboost)      
+library(ranger)       
+library(tidyverse)    
+library(doParallel)   
+library(caret)
+library(dplyr)
+library(here)
+library(ggplot2)
+library(recipes)
+```
+
+```{r weather_testing_and_training}
+
+
+yield_train_raw <- read.csv(here("data", "final_data_weather_training.csv"))
+yield_test_raw  <- read.csv(here("data", "final_data_weather_testing.csv"))
+
+
+yield_model_data <- yield_train_raw %>%
+  filter(!is.na(yield_mg_ha),
+         is.finite(yield_mg_ha)) %>%
+  select(-any_of(c(
+    "replicate",
+    "block",
+    "grain_moisture",
+    "planted_doy",
+    "harvested_doy",
+    "hybrid"
+  )))
+
+```
+
+
+
+```{r pre_processing}
+
+set.seed(123)
+yield_model_sample <- yield_model_data %>%
+  slice_sample(n = min(10000, nrow(yield_model_data)))
+
+```
+
+
+
+
+
+```{r data_split}
+
+#Create internal split for model evaluation
+# Official test data has missing yield, so RMSE is checked here
+set.seed(101)
+
+yield_split <- initial_split(
+  yield_model_sample,
+  prop = 0.80,
+  strata = yield_mg_ha
+)
+
+xgb_train <- training(yield_split)
+xgb_valid <- testing(yield_split)
+```
+
+```{r checking_distribution}
+ggplot(xgb_train, aes(x = yield_mg_ha)) +
+  geom_histogram(aes(y = after_stat(density)),
+                 bins = 30,
+                 fill = "skyblue",
+                 color = "black") +
+  geom_density(color = "red", linewidth = 1) +
+  labs(
+    title = "Distribution of Yield in Training Data",
+    x = "Yield (Mg/ha)",
+    y = "Density"
+  ) +
+  theme_minimal()
+
+```
+
+```{r Prepocessing_and_feature_enginnering}
+
+yield_xgb_recipe <- recipe(yield_mg_ha ~ ., data = xgb_train) %>%
+  
+  # Replace missing numeric values with median
+  step_impute_median(all_numeric_predictors()) %>%
+  
+  # Handle missing and new categorical levels
+  step_unknown(all_nominal_predictors()) %>%
+  step_novel(all_nominal_predictors()) %>%
+  
+  # Combine rare categorical levels
+  step_other(all_nominal_predictors(), threshold = 0.001) %>%
+  
+  # Convert categorical predictors into dummy variables
+  step_dummy(all_nominal_predictors()) %>%
+  
+  # Remove predictors with zero variance
+  step_zv(all_predictors())
+
+
+```
+
+
+```{r xgb_spec}
+
+yield_xgb_model <- boost_tree(
+  trees = tune(),
+  tree_depth = tune(),
+  min_n = tune(),
+  learn_rate = tune(),
+  sample_size = tune()
+) %>%
+  set_engine("xgboost") %>%
+  set_mode("regression")
+
+```
+
+```{r combine_recipie_model}
+yield_xgb_flow <- workflow() %>%
+  add_recipe(yield_xgb_recipe) %>%
+  add_model(yield_xgb_model)
+```
+
+
+```{r cross_validation_folds}
+
+set.seed(123)
+
+yield_cv <- vfold_cv(
+  xgb_train,
+  v = 5,
+  strata = yield_mg_ha
+)
+
+
+
+```
+
+
+```{r model_tuning}
+
+set.seed(101)
+
+yield_xgb_grid <- grid_latin_hypercube(
+  tree_depth(range = c(2, 8)),
+  min_n(range = c(5, 30)),
+  learn_rate(range = c(-3, -1)),
+  trees(range = c(100, 500)),
+  sample_prop(range = c(0.6, 0.9)),
+  size = 20
+)
+```
+
+
+
+
+```{r xgb_ANOVA_racing}
+set.seed(101)
+
+registerDoParallel(cores = parallel::detectCores() - 1)
+
+yield_xgb_race <- tune_race_anova(
+  yield_xgb_flow,
+  resamples = yield_cv,
+  grid = yield_xgb_grid,
+  metrics = metric_set(rmse, rsq),
+  control = control_race(save_pred = FALSE)
+)
+
+stopImplicitCluster()
+
+yield_xgb_race$.metrics[[2]]
+
+```
+
+
+
+
+```{r best_rmse}
+# Select best model by RMSE; low RMSE
+show_best(yield_xgb_race, metric = "rmse")
+
+xgb_best_params <- select_best(
+  yield_xgb_race,
+  metric = "rmse"
+)
+
+xgb_best_params
+
+lowest_xgb_rmse <- collect_metrics(yield_xgb_race) %>%
+  filter(.metric == "rmse") %>%
+  arrange(mean) %>%
+  slice(1)
+
+lowest_xgb_rmse
+
+
+```
+
+```{r best r2}
+# Select best model by R2; high R2
+
+show_best(yield_xgb_race, metric = "rsq")
+
+best_rsq_result <- collect_metrics(yield_xgb_race) %>%
+  filter(.metric == "rsq") %>%
+  arrange(desc(mean)) %>%
+  slice(1)
+
+best_rsq_result
+
+
+```
+
+
+
+```{r best_model_rmse}
+
+best_xgb_params <- select_best(
+  yield_xgb_race,
+  metric = "rmse"
+)
+
+best_xgb_params
+
+```
+
+```{r final_flow}
+# finalizing workflow using best rmse miel
+yield_xgb_final_flow <- finalize_workflow(
+  yield_xgb_flow,
+  best_xgb_params)
+
+
+```
+
+
+
+```{r final_fit}
+
+#internal training data and prediction of yeild
+yield_xgb_fit <- yield_xgb_final_flow %>%
+  fit(data = xgb_train)
+
+yield_valid_pred <- predict(yield_xgb_fit, new_data = xgb_valid) %>%
+  bind_cols(xgb_valid %>% select(yield_mg_ha))
+
+
+yield_valid_metrics <- yield_valid_pred %>%
+  metrics(
+    truth = yield_mg_ha,
+    estimate = .pred
+  )
+
+yield_valid_metrics
+
+```
+
+
+```{r}
+
+
+xgb_rmse_value <- yield_valid_pred %>%
+  rmse(truth = yield_mg_ha, estimate = .pred) %>%
+  pull(.estimate)
+
+xgb_rsq_value <- yield_valid_pred %>%
+  rsq(truth = yield_mg_ha, estimate = .pred) %>%
+  pull(.estimate)
+
+ggplot(yield_valid_pred, aes(x = yield_mg_ha, y = .pred)) +
+  geom_point(alpha = 0.4) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  annotate(
+    "text",
+    x = min(yield_valid_pred$yield_mg_ha, na.rm = TRUE),
+    y = max(yield_valid_pred$.pred, na.rm = TRUE),
+    label = paste0(
+      "RMSE = ", round(xgb_rmse_value, 3),
+      "\nR² = ", round(xgb_rsq_value, 3)
+    ),
+    hjust = 0
+  ) +
+  labs(
+    title = "Predicted vs Observed Yield - XGBoost",
+    x = "Observed Yield (Mg/ha)",
+    y = "Predicted Yield (Mg/ha)"
+  ) +
+  theme_minimal()
+
+
+```
+
+
+
+
+
+
+
+
+```{r final_fit_fulltraingdata}
+yield_xgb_full_fit <- yield_xgb_final_flow %>%
+  fit(data = yield_model_data)
+
+
+
+```
+
+```{r main_testing_data}
+yield_test_model <- yield_test_raw %>%
+  select(-any_of(c(
+    "replicate",
+    "block",
+    "grain_moisture",
+    "planted_doy",
+    "harvested_doy",
+    "hybrid"
+  )))
+
+
+```
+
+
+
+
+```{r final_yeild_predictionn}
+official_xgb_pred <- predict(
+  yield_xgb_full_fit,
+  new_data = yield_test_model
+)
+
+
+
+
+```
+
+```{r yeild_submission}
+yield_submission_xgb <- yield_test_raw %>%
+  bind_cols(official_xgb_pred) %>%
+  mutate(yield_mg_ha = .pred) %>%
+  select(year, site, hybrid, yield_mg_ha)
+
+
+```
+
+
+
+```{r}
+write.csv(
+  yield_submission_xgb,
+  here("output", "submission_xgb.csv"),
+  row.names = FALSE
+)
+
+```
+
+
+```{r}
+
+yield_submission_xgb %>%
+  summarise(
+    min_predicted_yield = min(yield_mg_ha, na.rm = TRUE),
+    max_predicted_yield = max(yield_mg_ha, na.rm = TRUE),
+    mean_predicted_yield = mean(yield_mg_ha, na.rm = TRUE),
+    number_unique_predictions = n_distinct(yield_mg_ha)
+  )
+
+```
