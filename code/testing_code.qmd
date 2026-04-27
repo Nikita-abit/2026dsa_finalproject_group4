@@ -2,6 +2,8 @@
 title: "open_source"
 format: html
 editor: visual
+editor_options: 
+  chunk_output_type: inline
 ---
 
 # Setup
@@ -21,10 +23,12 @@ library(daymetr)
 
 ```{r}
 # Import all CSV files
+library(here)
 
-meta <- read_csv("../data/testing_meta.csv")
-soil <- read_csv("../data/testing_soil.csv")
-trait <- read_csv("../data/testing_submission.csv")
+
+meta <- read_csv(here("data","testing_meta.csv"))
+soil <- read_csv(here("data", "testing_soil.csv"))
+trait <- read_csv(here("data", "testing_submission.csv"))
 
 # Merge all csv files in 1 file
 

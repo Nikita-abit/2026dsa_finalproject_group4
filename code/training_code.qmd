@@ -2,6 +2,8 @@
 title: "open_source"
 format: html
 editor: visual
+editor_options: 
+  chunk_output_type: inline
 ---
 
 # Setup
@@ -22,9 +24,11 @@ library(daymetr)
 ```{r}
 # Import all CSV files
 
-meta <- read_csv("../data/training_meta.csv")
-soil <- read_csv("../data/training_soil.csv")
-trait <- read_csv("../data/training_trait.csv")
+library(here)
+
+meta  <- read_csv(here("data", "training_meta.csv"))
+soil  <- read_csv(here("data", "training_soil.csv"))
+trait <- read_csv(here("data", "training_trait.csv"))
 
 # Merge all csv files in 1 file
 
@@ -85,7 +89,7 @@ ggplot() +
 
 
 ```{r}
-# Using Daymet to merge togheter sites and weather variables
+# Using Daymet to merge together sites and weather variables
 
 daymet_one <- download_daymet(site = final_data$site[1],
                               lat = final_data$latitude[1],
