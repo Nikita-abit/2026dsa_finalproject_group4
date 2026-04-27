@@ -1,0 +1,342 @@
+---
+title: "SVM"
+format: html
+editor: visual
+---
+
+```{r}
+
+# Step One: Load Libraries
+
+library(tidyverse)
+library(tidymodels)
+library(kernlab)
+library(plotly)
+library(vip)
+library(janitor)
+
+tidymodels_prefer()
+
+
+
+```
+```{r}
+
+# Step Two: Load Data
+
+data <- read_csv("../data/final_data_weather_training.csv") %>%
+  clean_names()
+
+data
+
+```
+```{r}
+
+# Step Three: Reduce dataset for SVM testing
+
+set.seed(001)
+
+data_model <- data %>%
+  filter(!is.na(yield_mg_ha)) %>%
+  select(-any_of(c(
+    "replicate",
+    "block",
+    "grain_moisture",
+    "planted_doy",
+    "harvested_doy"
+  )))
+
+data_model_small <- data_model %>%
+  slice_sample(n = 10000)
+
+```
+
+```{r}
+
+# Step Four: Train/Test Split
+
+set.seed(001)
+
+data_split <- initial_split(
+  data_model_small,
+  prop = 0.8,
+  strata = yield_mg_ha
+)
+
+train_data <- training(data_split)
+test_data <- testing(data_split)
+
+```
+
+```{r}
+
+# Step Five: Recipe
+
+svm_recipe <- recipe(yield_mg_ha ~ ., data = train_data) %>%
+  step_impute_median(all_numeric_predictors()) %>%
+  step_novel(all_nominal_predictors()) %>%
+  step_unknown(all_nominal_predictors()) %>%
+  step_other(all_nominal_predictors(), threshold = 0.001) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_zv(all_predictors()) %>%
+  step_normalize(all_numeric_predictors())
+
+```
+
+```{r}
+
+# Step Six: Specify SVM Model
+
+svm_spec <- svm_rbf(
+  cost = tune(),
+  rbf_sigma = tune()
+) %>%
+  set_engine("kernlab") %>%
+  set_mode("regression")
+
+```
+
+```{r}
+
+# Step Seven: Workflow
+
+svm_workflow <- workflow() %>%
+  add_recipe(svm_recipe) %>%
+  add_model(svm_spec)
+
+```
+
+```{r}
+
+# Step Eight: Cross Validation
+
+set.seed(001)
+
+svm_folds <- vfold_cv(
+  train_data,
+  v = 5,
+  strata = yield_mg_ha
+)
+
+```
+
+```{r}
+
+# Step Nine: Tune SVM
+
+svm_grid <- grid_regular(
+  cost(range = c(-2, 4)),
+  rbf_sigma(range = c(-5, 0)),
+  levels = 4
+)
+
+set.seed(001)
+
+svm_tune <- tune_grid(
+  svm_workflow,
+  resamples = svm_folds,
+  grid = svm_grid,
+  metrics = metric_set(rmse, rsq)
+)
+
+```
+
+```{r}
+
+# Step Ten: Select Best Model
+
+best_svm <- select_best(
+  svm_tune,
+  metric = "rmse"
+)
+
+best_svm
+
+```
+
+```{r}
+
+# Step Eleven: Finalize Workflow
+
+final_svm_workflow <- finalize_workflow(
+  svm_workflow,
+  best_svm
+)
+
+```
+
+```{r}
+
+# Step Twelve: Fit Final Model
+
+final_svm_fit <- final_svm_workflow %>%
+  fit(data = train_data)
+
+```
+
+```{r}
+
+# Step Thirteen: Predict on Internal Testing Set
+
+svm_pred <- predict(final_svm_fit, test_data) %>%
+  bind_cols(test_data %>% select(yield_mg_ha))
+
+```
+
+```{r}
+
+# Step Fourteen: Model Metrics
+
+svm_metrics <- svm_pred %>%
+  metrics(
+    truth = yield_mg_ha,
+    estimate = .pred
+  )
+
+svm_metrics
+
+```
+
+```{r}
+
+# Step Fifteen: Predicted vs Observed Plot
+
+rmse_val <- svm_pred %>%
+  rmse(truth = yield_mg_ha, estimate = .pred) %>%
+  pull(.estimate)
+
+r2_val <- svm_pred %>%
+  rsq(truth = yield_mg_ha, estimate = .pred) %>%
+  pull(.estimate)
+
+ggplot(svm_pred, aes(x = yield_mg_ha, y = .pred)) +
+  geom_point(alpha = 0.4) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  annotate(
+    "text",
+    x = min(svm_pred$yield_mg_ha, na.rm = TRUE),
+    y = max(svm_pred$.pred, na.rm = TRUE),
+    label = paste0(
+      "RMSE = ", round(rmse_val, 3),
+      "\nR² = ", round(r2_val, 3)
+    ),
+    hjust = 0
+  ) +
+  labs(
+    title = "Predicted vs Observed Yield - SVM",
+    x = "Observed Yield (Mg/ha)",
+    y = "Predicted Yield (Mg/ha)"
+  ) +
+  theme_minimal()
+
+```
+
+```{r}
+
+# Step Sixteen: Variable Importance
+
+set.seed(001)
+
+# Baseline performance
+baseline_pred <- predict(final_svm_fit, test_data) %>%
+  bind_cols(test_data %>% select(yield_mg_ha))
+
+baseline_rmse <- rmse(
+  baseline_pred,
+  truth = yield_mg_ha,
+  estimate = .pred
+) %>%
+  pull(.estimate)
+
+# Predictor names
+predictor_names <- test_data %>%
+  select(-yield_mg_ha) %>%
+  names()
+
+# Permutation importance
+perm_importance <- map_dfr(
+  predictor_names,
+  function(var) {
+    
+    permuted_data <- test_data
+    
+    permuted_data[[var]] <- sample(permuted_data[[var]])
+    
+    perm_pred <- predict(final_svm_fit, permuted_data) %>%
+      bind_cols(permuted_data %>% select(yield_mg_ha))
+    
+    perm_rmse <- rmse(
+      perm_pred,
+      truth = yield_mg_ha,
+      estimate = .pred
+    ) %>%
+      pull(.estimate)
+    
+    tibble(
+      variable = var,
+      rmse_permuted = perm_rmse,
+      importance = perm_rmse - baseline_rmse
+    )
+  }
+)
+
+perm_importance
+
+perm_importance %>%
+  arrange(desc(importance)) %>%
+  slice_head(n = 15) %>%
+  ggplot(aes(x = reorder(variable, importance), y = importance)) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Variable Importance - SVM",
+    x = "Variable",
+    y = "Increase in RMSE after permutation"
+  ) +
+  theme_minimal()
+
+```
+
+```{r}
+
+# Step Seventeen: Predicting on Ufficial Test
+
+testing_data_weather <- read_csv("../data/final_data_weather_testing.csv")
+
+final_prediction <- predict(
+  final_svm_fit,
+  testing_data_weather
+)
+
+submission_svm <- testing_data_weather %>%
+  bind_cols(final_prediction) %>%
+  mutate(yield_mg_ha = .pred) %>%
+  select(year, site, hybrid, yield_mg_ha)
+
+write_csv(submission_svm, "../data/submission_svm.csv")
+
+final_prediction %>%
+  summarise(
+    min = min(.pred),
+    max = max(.pred),
+    mean = mean(.pred),
+    n_unique = n_distinct(.pred)
+  )
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

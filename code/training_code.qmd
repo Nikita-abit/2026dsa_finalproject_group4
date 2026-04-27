@@ -72,7 +72,6 @@ final_data <- final_data %>%
 summary(final_data)
 ```
 
-
 ```{r}
 # Creating a map to see where are the sites
 
@@ -87,7 +86,6 @@ ggplot() +
              )
 ```
 
-
 ```{r}
 # Using Daymet to merge together sites and weather variables
 
@@ -101,7 +99,6 @@ daymet_one <- download_daymet(site = final_data$site[1],
 
 daymet_one
 ```
-
 
 ```{r}
 #
@@ -133,7 +130,6 @@ daymet_all$weather[[2]]
 names(daymet_all$weather[[1]])
 ```
 
-
 ```{r}
 # Unnest
 
@@ -156,7 +152,6 @@ daymet_all_unnest <- daymet_all %>%
 daymet_all_unnest
 ```
 
-
 ```{r}
 
 # Summarise for the weather columns I want to use
@@ -177,8 +172,6 @@ final_data_weather <- final_data %>%
   left_join(weather_summary, by = c("site", "year")) %>%
   select(-planted_doy, -harvested_doy)
 
- write_csv(final_data, "../data/final_data_weather_training.csv")
+ write_csv(final_data_weather, "../data/final_data_weather_training.csv")
 
 ```
-
-

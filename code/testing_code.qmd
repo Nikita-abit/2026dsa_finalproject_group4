@@ -158,6 +158,6 @@ weather_summary <- daymet_all_unnest %>%
 final_data_weather <- final_data %>%
   left_join(weather_summary, by = c("site", "year"))
 
- write_csv(final_data, "../data/final_data_weather_testing.csv")
+ write_csv(final_data_weather, "../data/final_data_weather_testing.csv")
 
 ```
