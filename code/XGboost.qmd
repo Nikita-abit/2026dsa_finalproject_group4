@@ -65,8 +65,6 @@ yield_model_data <- yield_train_raw %>%
 
 ```
 
-
-
 ```{r pre_processing}
 
 set.seed(123)
@@ -74,10 +72,6 @@ yield_model_sample <- yield_model_data %>%
   slice_sample(n = min(10000, nrow(yield_model_data)))
 
 ```
-
-
-
-
 
 ```{r data_split}
 
@@ -134,7 +128,6 @@ yield_xgb_recipe <- recipe(yield_mg_ha ~ ., data = xgb_train) %>%
 
 ```
 
-
 ```{r xgb_spec}
 
 yield_xgb_model <- boost_tree(
@@ -155,7 +148,6 @@ yield_xgb_flow <- workflow() %>%
   add_model(yield_xgb_model)
 ```
 
-
 ```{r cross_validation_folds}
 
 set.seed(123)
@@ -169,7 +161,6 @@ yield_cv <- vfold_cv(
 
 
 ```
-
 
 ```{r model_tuning}
 
@@ -185,11 +176,8 @@ yield_xgb_grid <- grid_latin_hypercube(
 )
 ```
 
-
-
-
 ```{r xgb_ANOVA_racing}
-set.seed(101)
+set.seed(1111)
 
 registerDoParallel(cores = parallel::detectCores() - 1)
 
@@ -206,9 +194,6 @@ stopImplicitCluster()
 yield_xgb_race$.metrics[[2]]
 
 ```
-
-
-
 
 ```{r best_rmse}
 # Select best model by RMSE; low RMSE
@@ -246,8 +231,6 @@ best_rsq_result
 
 ```
 
-
-
 ```{r best_model_rmse}
 
 best_xgb_params <- select_best(
@@ -267,8 +250,6 @@ yield_xgb_final_flow <- finalize_workflow(
 
 
 ```
-
-
 
 ```{r final_fit}
 
@@ -290,9 +271,9 @@ yield_valid_metrics
 
 ```
 
-
 ```{r}
 
+#Predicted vs Observed plot is based on the TESTING (validation) dataset
 
 xgb_rmse_value <- yield_valid_pred %>%
   rmse(truth = yield_mg_ha, estimate = .pred) %>%
@@ -325,13 +306,6 @@ ggplot(yield_valid_pred, aes(x = yield_mg_ha, y = .pred)) +
 
 ```
 
-
-
-
-
-
-
-
 ```{r final_fit_fulltraingdata}
 yield_xgb_full_fit <- yield_xgb_final_flow %>%
   fit(data = yield_model_data)
@@ -354,9 +328,6 @@ yield_test_model <- yield_test_raw %>%
 
 ```
 
-
-
-
 ```{r final_yeild_predictionn}
 official_xgb_pred <- predict(
   yield_xgb_full_fit,
@@ -377,17 +348,14 @@ yield_submission_xgb <- yield_test_raw %>%
 
 ```
 
-
-
 ```{r}
 write.csv(
   yield_submission_xgb,
-  here("output", "submission_xgb.csv"),
+  here("output", "testing_submission.csv"),
   row.names = FALSE
 )
 
 ```
-
 
 ```{r}
 
@@ -398,5 +366,15 @@ yield_submission_xgb %>%
     mean_predicted_yield = mean(yield_mg_ha, na.rm = TRUE),
     number_unique_predictions = n_distinct(yield_mg_ha)
   )
+
+```
+
+```{r _saving for shiny app}
+
+# Save objects for Shiny app
+saveRDS(yield_model_data, here("output", "yield_model_data.rds"))
+saveRDS(yield_valid_pred, here("output", "xgb_validation_predictions.rds"))
+saveRDS(yield_xgb_fit, here("output", "final_xgb_model.rds"))
+saveRDS(yield_xgb_full_fit, here("output", "final_xgb_full_model.rds"))
 
 ```
